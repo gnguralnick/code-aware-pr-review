@@ -32,6 +32,8 @@ be created from it and adapt it.
 | --- | --- |
 | ![The PR dashboard: open pull requests grouped by repository with status signals](libs/pr_review/docs/images/pr-list.png) | ![A review-comment thread with its resolved state and a one-click Unresolve control](libs/pr_review/docs/images/thread-resolution.png) |
 
+![Hovering a symbol in the diff shows its resolved signature and doc comment, with rich types enabled](libs/pr_review/docs/images/code-intelligence.png)
+
 ## Using this inspiration
 
 - **Adopt it** into a Minds workspace with the `use-inspiration` skill, pointing

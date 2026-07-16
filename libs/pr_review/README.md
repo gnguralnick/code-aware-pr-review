@@ -58,6 +58,8 @@ the commit), shared across PRs and pushes, and re-used automatically the next
 time the dependencies match -- so it only re-runs when dependencies actually
 change.
 
+![Hovering a symbol in the diff shows its resolved signature and doc comment, with rich types enabled](docs/images/code-intelligence.png)
+
 ### Review and act, without leaving the app
 
 Post general comments, submit line-comment reviews (comment / approve / request
