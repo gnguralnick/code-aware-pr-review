@@ -1,0 +1,76 @@
+"""Unit tests for pr_review.agent_stream (the shared stream-event renderer).
+
+These cover only the pure rendering of ``claude -p`` stream-json events into log
+lines; the subprocess-spawning ``run_streaming_agent`` is exercised by hand / in
+the release check (it launches a real agent).
+"""
+
+from pr_review import agent_stream
+
+
+def test_render_stream_event_logs_bash_command() -> None:
+    ev = {"type": "assistant", "message": {"content": [
+        {"type": "thinking", "thinking": "hmm"},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "grep -rn widget", "description": "Search"}},
+    ]}}
+    assert agent_stream.render_stream_event(ev) == ["$ grep -rn widget"]
+
+
+def test_render_stream_event_logs_assistant_text() -> None:
+    ev = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Reading the file now."}]}}
+    assert agent_stream.render_stream_event(ev) == ["● Reading the file now."]
+
+
+def test_render_stream_event_logs_other_tool_call() -> None:
+    ev = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": "main.py"}},
+    ]}}
+    assert agent_stream.render_stream_event(ev) == ["» Read main.py"]
+
+
+def test_render_stream_event_logs_tool_output_tail() -> None:
+    ev = {"type": "user", "tool_use_result": {"stdout": "line1\nline2\nline3", "stderr": ""}}
+    assert agent_stream.render_stream_event(ev) == ["line1", "line2", "line3"]
+
+
+def test_render_stream_event_ignores_noise() -> None:
+    assert agent_stream.render_stream_event({"type": "system", "subtype": "init"}) == []
+    assert agent_stream.render_stream_event({"type": "result", "result": "done"}) == []
+
+
+def test_build_argv_loads_only_user_settings() -> None:
+    # --setting-sources user keeps a reviewed repo's project/local hooks from
+    # loading, so a headless run cannot inherit them (e.g. a Stop hook that hangs
+    # it) even when its cwd is inside the checkout.
+    argv = agent_stream._build_argv(
+        "investigate this",
+        model="claude-haiku-4-5",
+        append_system_prompt="be read-only",
+        permission_mode="bypassPermissions",
+    )
+    assert argv[:3] == ["claude", "-p", "investigate this"]
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert argv[argv.index("--permission-mode") + 1] == "bypassPermissions"
+    assert argv[argv.index("--append-system-prompt") + 1] == "be read-only"
+
+
+def test_agent_env_isolates_child_from_blocking_hooks() -> None:
+    env = agent_stream._agent_env()
+    # Not the managed main session.
+    assert "MAIN_CLAUDE_SESSION_ID" not in env
+    # mngr's own Stop hooks skip on this marker.
+    assert env["MNGR_CLAUDE_SUBAGENT_PROXY_CHILD"] == "1"
+    # The user-scoped imbue-code-guardian reviewer Stop hook is disabled via its
+    # per-process config override, so it can't block the headless child.
+    assert env["CODE_GUARDIAN_STOP_HOOK__ENABLED_WHEN"] == "false"
+
+
+def test_first_line_truncates() -> None:
+    assert agent_stream.first_line("hello\nworld", 100) == "hello"
+    assert agent_stream.first_line("x" * 10, 4) == "xxxx …"
+    assert agent_stream.first_line("   ", 10) == ""
+
+
+def test_tail_lines_keeps_last_nonblank() -> None:
+    text = "a\n\nb\nc\n"
+    assert agent_stream.tail_lines(text, 2, 100) == ["b", "c"]
