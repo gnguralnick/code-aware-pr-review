@@ -24,6 +24,9 @@ be created from it and adapt it.
   JavaScript/TypeScript (tree-sitter) with zero setup, plus an opt-in "rich types"
   mode that installs the repo's dependencies to resolve third-party and inferred
   types.
+- **Ask an agent about the change** -- right-click a line and ask a free-form
+  question; a read-only headless `claude -p` agent investigates the PR's cached
+  checkout and answers inline, with its full investigation log kept per PR.
 - **Review and act in place** -- comment, submit line-comment reviews, edit the
   title/description, merge, resolve/reopen review threads, and flip a PR between
   draft and ready-for-review.

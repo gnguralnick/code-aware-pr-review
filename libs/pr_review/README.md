@@ -60,6 +60,18 @@ change.
 
 ![Hovering a symbol in the diff shows its resolved signature and doc comment, with rich types enabled](docs/images/code-intelligence.png)
 
+### Ask an agent about the change
+
+Right-click a line in the diff and ask a free-form question about it -- "why is
+this needed?", "what calls this?", "is this safe?". Instead of posting a comment,
+it launches a read-only headless `claude -p` agent inside the PR's cached
+checkout, lets it investigate the actual code, and reports the answer inline at
+that line. The agent is strictly read-only (it may read and search the checkout
+but makes no edits and touches nothing outside it). Each question -- the prompt,
+the streamed investigation log, and the final answer -- is stored durably per PR,
+so answers reappear when you reopen the PR and the full log stays viewable as the
+record of how the answer was reached.
+
 ### Review and act, without leaving the app
 
 Post general comments, submit line-comment reviews (comment / approve / request
