@@ -1,100 +1,114 @@
 # pr-review
 
-A code-aware web interface for reviewing your GitHub pull requests, served at
-`/service/pr-review/` (port 8082).
+A code-aware web interface for reviewing your GitHub pull requests. It fetches
+the full repository at the PR's head commit and renders changes as full-file
+diffs with hover, go-to-definition, and cross-repo find-usages -- so you review a
+change in the context of the whole codebase, not a keyhole of surrounding lines.
+Served at `/service/pr-review/`.
+
+![The code-aware diff view: a full-file side-by-side diff with the changed-files list, PR status, and per-file review actions](docs/images/diff-view.png)
+
+## Why
+
+GitHub's own review UI shows you the changed lines and a few lines around them.
+For anything non-trivial that isn't enough: you end up opening the repo in
+another tab to see the function being changed, who calls it, or what a type
+actually is. `pr-review` closes that gap. When you open a PR it downloads the
+entire repository at the head commit, so every changed file is shown in full,
+any file in the repo is one click away, and code intelligence works across the
+whole tree -- all without leaving the review.
 
 ## What it does
 
-1. **PR list.** Lists the authenticated viewer's open PRs (authored +
-   review-requested) with status signals -- CI verdict, review decision,
-   merge-conflict state, and diffstat -- enriched lazily per row. A left status
-   strip (with a legend and per-row tooltip) summarizes each PR at a glance, and
-   a toolbar offers repo grouping (or a flat list), sorting, and a title/repo
-   search; the filter / grouping / sort choices persist in `localStorage`.
-2. **Code-aware diff view.** On opening a PR it fetches the full repo source at
-   the PR head commit (GitHub tarball) and caches it under
-   `runtime/pr-review/repos/`, then renders changed files as full-file diffs in a
-   Monaco editor. You can open any file in the repo, find-usages across the whole
-   tree (ripgrep), and get code-aware hover / go-to-definition for Python (Jedi)
-   and for JavaScript / TypeScript (tree-sitter -- `.js/.jsx/.ts/.tsx` and their
-   `.mjs/.cjs/.mts/.cts` variants).
-3. **Rich types (opt-in, per repo).** The zero-setup engines resolve the repo's
-   own code but not third-party members -- tree-sitter is only a parser (e.g.
-   `session.fromPartition` from `require('electron')` is opaque), and Jedi, while
-   type-aware, has no dependencies installed to resolve against. The "Types:
-   basic / Enable rich" pill in the detail header opts a repo into real type
-   resolution for **both languages in one action**: it launches a single headless
-   agent (`claude -p`) inside the cached tree that installs whatever is present --
-   the repo's JS/TS dependencies (npm / pnpm / ...) plus a pinned TypeScript 5.x
-   language server, and/or the repo's Python dependencies into an isolated venv at
-   `.pr-review-prep/venv` (uv / pip / poetry). After that, JS/TS hover /
-   go-to-definition come from the TypeScript language service (member + inferred
-   types, library `.d.ts`), and Python hover / go-to-definition run Jedi against
-   the prepared venv (third-party + inferred types); both fall back to their
-   zero-setup engine on any error. State lives under `.pr-review-prep/` in the
-   tree; "clear" removes it and the installed `node_modules` for that checkout
-   (the shared store is left intact). A finished prep is shared across PRs and
-   pushes: it is keyed by a fingerprint of the repo's dependency files
-   (`package.json` + lockfiles, `pyproject.toml` / `uv.lock` / `requirements*.txt`
-   / ...) rather than the commit SHA and published to a store under
-   `runtime/pr-review/prep/` (bounded by an LRU cap per repo), so any later
-   checkout whose dependencies match reuses it -- the JS artifacts by symlink, the
-   Python venv referenced in place -- instead of reinstalling. When the
-   dependencies match an existing prep exactly, rich types **auto-enable**
-   silently (no agent) -- the pill flips to "rich" on its own. Only a genuine
-   install (new or changed dependencies) launches the agent, which runs the
-   packages' install scripts and spends Claude usage; that remains strictly manual
-   behind the Enable action, and it is seeded from the repo's nearest prior prep
-   so it updates incrementally rather than from scratch. Note: `npm install
-   typescript` now resolves to TypeScript 7.x, whose npm package lacks the classic
-   language service API -- the agent pins `typescript@5` for this reason.
-4. **Write-back.** Post general comments, submit line-comment reviews
-   (comment / approve / request-changes), edit the PR title/description, resolve
-   or reopen review-comment threads, mark a draft ready for review (or convert a
-   ready PR back to a draft), and close / reopen or merge a PR (merge / squash /
-   rebase) -- from the detail page or a home-page right-click menu, behind a
-   confirm step. Thread resolution and the draft toggle go through GitHub's
-   GraphQL API (the operations GitHub exposes only there); everything else is
-   REST. A line comment in the conversation and the in-diff view shows whether
-   its thread is resolved, with a one-click Resolve / Unresolve control.
+### A dashboard of the PRs that need you
+
+Lists the authenticated viewer's open pull requests -- both the ones you authored
+and the ones you were asked to review -- with at-a-glance status: CI verdict,
+review decision, merge-conflict state, and a diffstat. Filter to the ones that
+need attention, group by repository or view a flat list, sort, and search by
+title or repo; your filter, grouping, and sort choices persist between visits.
+
+![The PR dashboard: open pull requests grouped by repository with CI, review, and draft status signals](docs/images/pr-list.png)
+
+### A code-aware diff view
+
+Opening a PR fetches the full repo source at the head commit (via the GitHub
+tarball, cached on disk) and renders each changed file as a full-file diff in a
+Monaco editor -- the same editor core as VS Code. From there you can:
+
+- **Open any file in the repo**, not just the changed ones, to trace context.
+- **Find usages** of a symbol across the entire tree (ripgrep), definitions
+  floated to the top.
+- **Hover and go-to-definition** for Python (Jedi) and JavaScript / TypeScript
+  (tree-sitter) -- covering `.js/.jsx/.ts/.tsx` and their `.mjs/.cjs/.mts/.cts`
+  variants -- resolving the repo's own code with zero setup.
+
+### Rich types (opt-in, per repo)
+
+The zero-setup engines resolve the repo's own symbols but not third-party
+members -- tree-sitter is only a parser, and Jedi has no dependencies to resolve
+against. The **Enable rich types** pill in a PR's header opts a repo into real
+type resolution for both languages at once: a single headless agent installs the
+repo's JS/TS dependencies (plus a pinned TypeScript language server) and its
+Python dependencies (into an isolated virtualenv). After that, hover and
+go-to-definition resolve member and inferred types, including from libraries.
+
+A finished setup is keyed by a fingerprint of the repo's dependency files (not
+the commit), shared across PRs and pushes, and re-used automatically the next
+time the dependencies match -- so it only re-runs when dependencies actually
+change.
+
+### Review and act, without leaving the app
+
+Post general comments, submit line-comment reviews (comment / approve / request
+changes), edit the PR title and description, and close, reopen, or merge
+(merge / squash / rebase) -- from the detail page or a right-click menu on the
+dashboard, each behind a confirm step.
+
+It also does the two things GitHub only exposes through its GraphQL API:
+**resolve or reopen review-comment threads**, and **mark a draft ready for
+review** (or convert a ready PR back to a draft). Each line comment shows whether
+its thread is resolved, with a one-click Resolve / Unresolve control in both the
+conversation and the in-diff view.
+
+![A review-comment thread showing its resolved state and a one-click Unresolve control](docs/images/thread-resolution.png)
 
 ## How GitHub access works
 
-Every GitHub call -- REST and GraphQL alike -- goes through `latchkey curl`, so
-the user's stored credentials are injected transparently and no token ever lives
-in this process. The transport is a single seam (`github._curl`); each network
-function takes an injectable `curl` parameter that defaults to it, which is how
-the tests run without touching the network. REST requests use `gh_json` /
-`gh_request`; the GraphQL-only operations (resolve/unresolve a review thread,
-mark ready / convert to draft, read thread state) go through `gh_graphql`, which
-POSTs to the `/graphql` endpoint over the same seam.
+Every GitHub call -- REST and GraphQL alike -- goes through `latchkey`, so your
+stored credentials are injected transparently and no token ever lives in this
+process. The transport is a single seam (`github._curl`); each network function
+takes an injectable `curl` parameter that defaults to it, which is how the whole
+test suite runs without touching the network. REST requests use `gh_json` /
+`gh_request`; the GraphQL-only operations (resolve/reopen a review thread, mark
+ready / convert to draft, read thread state) go through `gh_graphql`, which POSTs
+to the `/graphql` endpoint over that same seam.
 
-The CI verdict deliberately ignores GitHub's legacy combined-status endpoint when
-it reports zero statuses: that endpoint defaults to `pending` with no statuses,
-which would otherwise wrongly override a clean check-runs result.
+> The GraphQL features require a `latchkey` new enough to expose the
+> `github-graphql-api` scope (2.20.2 or later). On older `latchkey` those actions
+> are denied by the gateway while every REST feature keeps working.
 
 ## Layout
 
 - `src/pr_review/runner.py` -- the Flask app and routes.
-- `src/pr_review/github.py` -- GitHub access, status enrichment, the repo-tree
-  cache, and ripgrep find-usages.
-- `src/pr_review/pyintel.py` -- Jedi-backed hover and go-to-definition (Python):
-  pins resolution to the repo's own source roots, and when the repo has been
-  prepared, runs Jedi against the prepared venv so third-party types resolve too.
+- `src/pr_review/github.py` -- GitHub access (REST via `gh_json`/`gh_request`,
+  GraphQL via `gh_graphql`), status enrichment, the repo-tree cache, and ripgrep
+  find-usages.
+- `src/pr_review/pyintel.py` -- Jedi-backed hover and go-to-definition (Python),
+  pinned to the repo's own source roots, and run against the prepared virtualenv
+  when rich types are enabled.
 - `src/pr_review/jsintel.py` -- tree-sitter-backed hover and go-to-definition
-  (JavaScript / TypeScript): declaration signatures + doc comments, and
-  definitions resolved locally and across relative imports in the cached tree.
+  (JavaScript / TypeScript): declaration signatures + doc comments, resolved
+  locally and across relative imports.
 - `src/pr_review/prepare.py` -- the opt-in "rich types" state machine: launches
-  the headless install/setup agent, tracks state under `.pr-review-prep/`, and
-  shares finished preps across checkouts via a dependency-fingerprint-keyed store
-  under `runtime/pr-review/prep/` (reuse by symlink, auto-enable, seeded installs).
-- `src/pr_review/tsintel.py` -- rich hover / go-to-definition via a persistent
-  TypeScript language service, used for prepared repos (falls back to jsintel).
-- `src/pr_review/assets/tsintel_server.mjs` -- the Node language-service helper
-  that `tsintel.py` drives (line-delimited JSON protocol).
+  the headless install agent, tracks state under `.pr-review-prep/`, and shares
+  finished setups across checkouts via a dependency-fingerprint-keyed store.
+- `src/pr_review/tsintel.py` + `assets/tsintel_server.mjs` -- rich hover /
+  go-to-definition via a persistent TypeScript language service (falls back to
+  jsintel on any error).
 - `src/pr_review/assets/` -- the frontend (`index.html`, `app.js`, `app.css`);
-  Monaco loads from a CDN and all fetches are relative so the app works behind
-  the system_interface proxy.
+  Monaco loads from a CDN and all fetches are relative, so the app works behind a
+  path-prefix proxy.
 - `src/pr_review/testing.py` -- test helpers (`FakeCurl` and friends).
 
 ## Testing
@@ -107,7 +121,6 @@ Tests never make real network calls, real `latchkey` calls, or real writes: the
 `curl` transport is injected as a `FakeCurl`, and repo-tree-backed routes are
 served from a pre-seeded on-disk cache. On-disk behavior (the cache, ripgrep,
 Jedi, tree-sitter, the path-traversal guards) runs for real against trees built
-in `tmp_path`. The rich-types paths are seam-injected too -- the prepare agent
-launcher and the `tsintel` language-service process are never spawned for real in
-the suite (the `claude -p` agent + Node language service are exercised by hand /
-in the release check).
+in a temporary directory. The rich-types paths are seam-injected too, so the
+prepare agent and the TypeScript language-service process are never spawned for
+real in the suite.

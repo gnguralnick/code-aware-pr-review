@@ -1,44 +1,49 @@
-# forever-claude-template
+# Code-Aware PR Review
 
-A self-contained template for running a persistent Claude agent that communicates via Telegram, delegates work to sub-agents, and can manage its own background services.
+A self-hosted web app for reviewing your own GitHub pull requests with real code
+context. GitHub's diff UI shows you the changed lines and little else; this opens
+the change inside the whole repository -- full-file diffs, hover and
+go-to-definition, and cross-repo find-usages -- so you review with the context
+you actually need.
 
-## Usage
+![The code-aware diff view: a full-file side-by-side diff with the changed-files list, PR status, and per-file review actions](libs/pr_review/docs/images/diff-view.png)
 
-```bash
-mngr create my-workspace main -t local \
-    --host-env MINDS_WORKSPACE_NAME=my-workspace \
-    --project ~/project/forever-claude-template \
-    --pass-env TELEGRAM_BOT_TOKEN \
-    --pass-env TELEGRAM_USER_NAME
-```
+This repository is a **Minds inspiration**: a clean, bootable snapshot of the app
+on top of a starter workspace template, published so another Minds workspace can
+be created from it and adapt it.
 
-## Structure
+## What it does
 
-- `CLAUDE.md` - Agent instructions
-- `parent.toml` - Upstream repo for pulling updates
-- `.mngr/settings.toml` - Agent types, create templates, command defaults
-- `skills/` - Agent skills (telegram, task delegation, services, self-update)
-- `scripts/` - Utility scripts (reviewer settings)
-- `event-processor/` - Pre-configured directory for creating persistent sub-agents
-- `supervisord.conf` - Supervisord config defining the background services
-- `libs/telegram_bot/` - Telegram bot, send CLI, and history viewer
-- `libs/bootstrap/` - First-boot setup, then launches supervisord to supervise the services
-- `vendor/mngr/` - A vendored, mutable copy of mngr. Note that making changes here *will* affect the behavior of the `mngr` command
-- `vendor/tk/` - A vendored copy of the [tk](https://github.com/wedow/ticket) ticket tracker. The `ticket` script (also callable as `tk`) manages tickets stored as markdown. We point `TICKETS_DIR` at `runtime/tickets/` (set in `.mngr/settings.toml`'s `host_env`) so tickets are backed up alongside the rest of `runtime/` on the `mindsbackup/$MNGR_AGENT_ID` branch.
+- **A dashboard of the PRs that need you** -- your authored and review-requested
+  pull requests with CI, review, merge-conflict, and draft status; filter, group,
+  sort, and search.
+- **A code-aware diff view** -- opening a PR downloads the full repo at the head
+  commit and renders each changed file as a full-file diff in a Monaco editor,
+  with any file one click away.
+- **Code intelligence** -- hover and go-to-definition for Python (Jedi) and
+  JavaScript/TypeScript (tree-sitter) with zero setup, plus an opt-in "rich types"
+  mode that installs the repo's dependencies to resolve third-party and inferred
+  types.
+- **Review and act in place** -- comment, submit line-comment reviews, edit the
+  title/description, merge, resolve/reopen review threads, and flip a PR between
+  draft and ready-for-review.
 
-## Create templates
+| PR dashboard | Review-thread resolution |
+| --- | --- |
+| ![The PR dashboard: open pull requests grouped by repository with status signals](libs/pr_review/docs/images/pr-list.png) | ![A review-comment thread with its resolved state and a one-click Unresolve control](libs/pr_review/docs/images/thread-resolution.png) |
 
-- `worker` - For sub-agents created via the launch-task skill (includes code review)
-- `subskill-worker` - Sub-agent for any flow that hands its worker the generic harden worker (the crystallize / update / heal artifact lifecycle, including the update-system-interface flow). Inherits from `worker` and pre-installs the single generic worker from `.agents/shared/worker/` into its own `.agents/skills/` as `harden-worker`.
+## Using this inspiration
 
-## Artifact harden lifecycle
+- **Adopt it** into a Minds workspace with the `use-inspiration` skill, pointing
+  it at this repository's URL. Start with
+  [`inspiration-code-aware-pr-review.md`](inspiration-code-aware-pr-review.md) --
+  the manifest that describes what it is, its prerequisites (the GitHub access it
+  needs), and how to adapt it.
+- **Read the app's own docs** at
+  [`libs/pr_review/README.md`](libs/pr_review/README.md) for the full feature and
+  architecture details.
 
-The main agent can promote ad-hoc work into reusable artifacts, fix artifacts that fail, and extend artifacts that came up short -- across skills, web services, and the system interface. The user-invokable surface is three generic operation leads (main agent side), each parameterized by the artifact:
-
-- `crystallize-artifact` - Create a new artifact (default: a skill reconstructed from the just-finished turn). Invoked directly post-turn, or by the live-half wrappers (`build-web-service`, `fetch-process-show`) once a prototype is confirmed.
-- `heal-artifact` - Fix a skill or service that errored or produced wrong results.
-- `update-artifact` - Extend / refactor / verify a skill, service, or shared reference; one flow with a committed-vs-emergent design-gate toggle.
-
-Each lead spawns a `subskill-worker` sub-agent that runs the single generic `harden-worker` sub-skill. The worker reads the operation and artifact from its task file and composes the universal `harden-artifact.md` contract with one `op-*.md` and one `artifact-*.md` reference under `.agents/shared/worker/references/`. Workers commit to `mngr/<task-name>` branches; main merges on user approval. (The same template also backs the `update-system-interface` flow, which wraps `update-artifact` with `artifact=system-interface` and adds its preview / safe-reveal go-live.)
-
-Crystallized skills are marked with `metadata.crystallized: true` in their SKILL.md frontmatter and follow the [agentskills.io](https://agentskills.io/specification) layout (`scripts/run.py` as a PEP 723 script, companion SKILL.md, optional `references/` and `assets/`).
+> One note on this snapshot: the vendored `mngr`'s non-confidential Google OAuth
+> installed-app client secret is blanked for public release. It is unrelated to
+> the PR-review app; restore it from upstream `mngr` only if you use the
+> Minds-provided Google OAuth client.
